@@ -1028,20 +1028,6 @@ function Invoke-Generic {
    } 
 }
 
-function Import-Namespace {
-   [CmdletBinding()]
-   param(
-      [Parameter(ValueFromPipeline=$true)]
-      [string]$Namespace,
-
-      [Switch]$Force
-   )
-   end {
-     Get-Type -Namespace $Namespace -Force:$Force | Add-Accelerator
-   }
-}
-
-
 ###############################################################################
 ##### Imported from PowerBoots
 
@@ -2002,8 +1988,8 @@ Update-TypeData -MemberType ScriptProperty -MemberName TokenType -Value { $this.
 # SIG # Begin signature block
 # MIIXxAYJKoZIhvcNAQcCoIIXtTCCF7ECAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQU5WAd11CdCfz29lkhENEqYvaD
-# mO2gghL3MIID7jCCA1egAwIBAgIQfpPr+3zGTlnqS5p31Ab8OzANBgkqhkiG9w0B
+# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUmu3qJ4SrrX7WRYIiQZLH8y1P
+# JA+gghL3MIID7jCCA1egAwIBAgIQfpPr+3zGTlnqS5p31Ab8OzANBgkqhkiG9w0B
 # AQUFADCBizELMAkGA1UEBhMCWkExFTATBgNVBAgTDFdlc3Rlcm4gQ2FwZTEUMBIG
 # A1UEBxMLRHVyYmFudmlsbGUxDzANBgNVBAoTBlRoYXd0ZTEdMBsGA1UECxMUVGhh
 # d3RlIENlcnRpZmljYXRpb24xHzAdBgNVBAMTFlRoYXd0ZSBUaW1lc3RhbXBpbmcg
@@ -2109,22 +2095,22 @@ Update-TypeData -MemberType ScriptProperty -MemberName TokenType -Value { $this.
 # BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
 # EAJduvEGEWPX+NXGHau130EwCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
 # oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFDYAweAHPlmXSoU+YUMf
-# GZf4n4rtMA0GCSqGSIb3DQEBAQUABIIBACMjS4waBIiwvRZeADP+92/orF9fPrRK
-# guHvLWdZdaF74S5biL4gXWlrDOhOvkrY/01rczz+CEM+IAtVOAyr5J/P7laCJ4iy
-# 0sRgpn2t+CMzQvYV1p0u4Lfg+cfgUZ0MSG0yEgxFrLvHoq3ogYUqx+dXwZFO2gMp
-# eJzQ00lQ4egPTricbn0uGpQeD9otOxwG1uHCYr48ONX1rPrx2rhUEuyZXW3jL8pK
-# eamnZjmfrhXrKek3R1fhL4E1OoAX38D49SqF4WempNmwYLILij3yk4jOSDWwRiZG
-# vZZ041fbvi3Xdk7nFAasmzMsuAh6IkVdjYEAsekJXUGq4w1cMsFNyQyhggILMIIC
+# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFMvvD7Gblea5voZ1g846
+# bz3CIS+0MA0GCSqGSIb3DQEBAQUABIIBAAymsrpFiNkt3wB8QHtOvMyDfAbf9kls
+# m8p6GqtiXpNPS996KhQfnHQbyl/uAzdZ2cSrQhDhndw9Yu372DOPNPCWLRGxSD8l
+# wbRa2jxU991+ETgGRb/HeIX2unrko/2sNAAsVodaccvjS0ficPnnsc20xaFaD8Wi
+# KZ0Sd4yGHWv2fuPMTu2SyKspF0dZmcfwtKCuzQb3J21mNZtES2TpQD93T1hAlrPD
+# pYcCho8NAEFXjQ9Aby7rXoo7pMtIQkqxcca7NAY61XgkwpgikUqnAhmoTzXRCWFG
+# N8qfHf9HFwJYikAqA0aGmex8irLUubzmcrcM5ylgE5/haXpyEQRBGc6hggILMIIC
 # BwYJKoZIhvcNAQkGMYIB+DCCAfQCAQEwcjBeMQswCQYDVQQGEwJVUzEdMBsGA1UE
 # ChMUU3ltYW50ZWMgQ29ycG9yYXRpb24xMDAuBgNVBAMTJ1N5bWFudGVjIFRpbWUg
 # U3RhbXBpbmcgU2VydmljZXMgQ0EgLSBHMgIQDs/0OMj+vzVuBNhqmBsaUDAJBgUr
 # DgMCGgUAoF0wGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUx
-# DxcNMTUwNTA1MDU1ODQ0WjAjBgkqhkiG9w0BCQQxFgQUidSUtdh0EktPwOuxLtBX
-# PskwBUEwDQYJKoZIhvcNAQEBBQAEggEAMHPSmH+SY5I4+LYyqIIkNfTBoX1zVW0o
-# 6j78XxYlKsX3c4oQqugbiXWF+Ya+y+/QLSjxNbpTp0KAKdL21JcYK/ZqUxwQ1qpO
-# cqvfnMURsSCcTZ9Flm0jcJLwzSyOw5F9Ps9CBFGylNnZFwI6yAIsfxQFaRxAz4As
-# qPLmtU1658McFD4psxJlVoSmMK6b5bFByGyiVaqWBjoVqwd7SDQWzG4ZgMbnkUV7
-# qkFh2PphspHQIjg4qiuAmrUh96LPawowCVF+vfckUAEZ5mEyBWkxmWbS0kU1DFKP
-# rBsu1+6spAcKzS2eogC35B77NmOEQzqyWvvNyBFG8Jc483fxWBOkIA==
+# DxcNMTUwNTA3MjIwMDAzWjAjBgkqhkiG9w0BCQQxFgQUTMK4qc2eubVgP3StzIV8
+# vNAQ7dswDQYJKoZIhvcNAQEBBQAEggEAQzYcp1wNIkO0sQwxnOfKrVn5ZXZrR0n8
+# Kp4LjR3VYKERTUsDNHCwNZwi8OTOnYejin4A/trSCyoNh5z/l+spYvJuZblU8qt0
+# p0R4DUcxS2ek/bVWmOmzdZhu76eUM3kD28nOcgOpcvVIT2syNtnwb6J2M5qKdIVi
+# /0aHAuMe/39yRwytg6rQuPdLwhAB8uPe1tlXiqjNh27ume6CH9uGC1YCP6Iy4Egy
+# Gy7EDp/uAN6qyGR8ssVkRoD91WCTtpRn36A4rXDqxlDmCpZ/VIfb4Wlsek6Za1OW
+# 0s5RjzqbqUnT5u+pHSLeMwRGAUlXxy1qVLnlJMVXfW7cQKl1h7GEGg==
 # SIG # End signature block
