@@ -1,10 +1,10 @@
 ﻿@{
 
 # Script module or binary module file associated with this manifest.
-RootModule = '.\Reflection.psm1'
+RootModule = 'Reflection.psm1'
 
 # Version number of this module.
-ModuleVersion = '4.8'
+ModuleVersion = '4.9'
 
 # ID used to uniquely identify this module
 GUID = '64b5f609-970f-4e65-b02f-93ccf3e60cbb'
@@ -46,7 +46,7 @@ RequiredModules = @(@{ModuleName = 'Autoload'; GUID = '4001ca5f-8b94-41a1-9229-4
 # RequiredAssemblies = @()
 
 # Script files (.ps1) that are run in the caller's environment prior to importing this module.
-# ScriptsToProcess = @()
+ScriptsToProcess = @("Get-ParameterValue.ps1")
 
 # Type files (.ps1xml) to be loaded when importing this module
 # TypesToProcess = @()
@@ -60,7 +60,7 @@ RequiredModules = @(@{ModuleName = 'Autoload'; GUID = '4001ca5f-8b94-41a1-9229-4
 # Functions to export from this module
 FunctionsToExport = 'Add-Accelerator', 'Add-Assembly', 'Add-ConstructorFunction', 
                'Add-Struct', 'Add-Enum', 'Get-Accelerator', 'Get-Argument', 
-               'Get-Assembly', 'Get-Constructor', 'Get-ExtensionMethod', 
+               'Get-Assembly', 'Get-Constructor', 'Get-ExtensionMethod', 'Import-ExtensionMethod',
                'Get-MemberSignature', 'Get-Method', 'Get-ReflectionModule', 'Get-Type', 
                'Import-ConstructorFunctions', 'Import-Namespace', 'Invoke-Generic', 
                'Invoke-Member', 'New-ModuleManifestFromSnapin', 'Read-Choice', 

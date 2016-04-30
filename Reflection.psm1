@@ -63,7 +63,7 @@ if(!$ReflectionRoot) {
 Import-Module "${ReflectionRoot}\Accelerator.psm1"
 Import-Module "${ReflectionRoot}\AST.psm1"
 Import-Module "${ReflectionRoot}\CliXml.psm1"
-
+Import-Module "${ReflectionRoot}\ExtensionMethods.psm1"
 
 function Get-Type {
    <#
@@ -346,71 +346,6 @@ function Get-Constructor {
    process { 
       $type.GetConstructors() | Where-Object { $Force -or $_.IsPublic -and -not $_.IsStatic } -OutVariable ctor 
       if(!$ctor -and !$NoWarn) { Write-Warning "There are no public constructors for $($type.FullName)" }
-   }
-}
-
-function Get-ExtensionMethod {
-   <#
-      .Synopsis
-         Finds Extension Methods which target the specified type
-      .Example
-         Get-ExtensionMethod String
-
-         Finds all extension methods which target strings
-   #>
-   [CmdletBinding()]
-   param(
-      # The type name to find Extension Methods for
-      [Parameter(Mandatory=$false,Position=0)]
-      [SupportsWildCards()]
-      [String[]]$TargetTypeName,
-
-      # A filter for the Extension Method name 
-      [Parameter(Mandatory=$false)]
-      [SupportsWildCards()]
-      [String[]]$Name = "*",
-
-      # The type to search for Extension Methods (defaults to search all types)
-      [Parameter(Mandatory=$false,Position=99)]
-      [SupportsWildCards()]
-      [String[]]$TypeName = "*"
-   )
-   process {
-      Get-Type -TypeName $TypeName -Attribute ExtensionAttribute | 
-         Get-Method -Name $Name -BindingFlags "Static,Public,NonPublic" -Attribute ExtensionAttribute |
-         ForEach-Object { 
-            $Method = $_
-            $ParameterType = $_.GetParameters()[0].ParameterType
-
-            ForEach($T in $TargetTypeName) {
-               Write-Verbose "Is '$T' a '$ParameterType'?"
-               if($ParameterType.Name -like $T -or $ParameterType.FullName -like $T) {
-                  Write-Verbose "The name '$T' matches '$ParameterType'"
-                  Add-Member -Input $Method -Type NoteProperty -Name ParamBlock -Value (Get-MemberSignature $Method -ParamBlock) -Force
-                  Write-Output $Method
-                  continue
-               }
-               
-               if($ParameterType.IsGenericType) {
-                  $interface = $null
-                  if(Test-AssignableToGeneric $T $ParameterType -interface ([ref]$interface)) {
-                  # if([GenericHelper]::IsAssignableToGenericType( $T, $ParameterType )) {
-                     Write-Verbose "'$T' is a generic that's assignable to '$ParameterType'"
-                     Add-Member -Input $Method -Type NoteProperty -Name Extends -Value $interface.Value -Force
-                     Add-Member -Input $Method -Type NoteProperty -Name ParamBlock -Value (Get-MemberSignature $Method -GenericArguments $interface.GetGenericArguments() -ParamBlock) -Force
-                     Write-Output $Method
-                     continue
-                  }
-               } else {
-                  if($ParameterType.IsAssignableFrom($T)) {
-                     Write-Verbose "'$ParameterType' is assignable from '$T'"
-                     Add-Member -Input $Method -Type NoteProperty -Name ParamBlock -Value (Get-MemberSignature $Method -ParamBlock) -Force
-                     Write-Output $Method
-                     continue
-                  }     
-               }
-            }
-         }
    }
 }
 
@@ -1984,7 +1919,7 @@ Set-Alias gt Get-Type
 Set-Alias gasm Get-Assembly
 Set-Alias gctor Get-Constructor
 
-Update-TypeData -MemberType ScriptProperty -MemberName TokenType -Value { $this.GetType().FullName } -TypeName System.Management.Automation.Language.Ast -ErrorAction SilentlyContinue
+Update-TypeData -MemberType ScriptProperty -MemberName TokenType -Value { $this.GetType().FullName } -TypeName System.Management.Automation.Language.Ast -Force
 # SIG # Begin signature block
 # MIIXxAYJKoZIhvcNAQcCoIIXtTCCF7ECAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
 # gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
