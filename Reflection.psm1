@@ -131,49 +131,56 @@ function Get-Type {
       [Switch]$Force
    )
 
-   process {
-      if($psCmdlet.ParameterSetName -eq 'Enum') {
-         if($Enum -is [Enum]) {
-            [Enum]::GetValues($enum.GetType())
-         } elseif($Enum -is [Type] -and $Enum.IsEnum) {
-            [Enum]::GetValues($enum)
-         } else {
-            throw "Specified Enum is neither an enum value nor an enumerable type"
-         }
-      }
-      else {
-         if($Assembly -as [Reflection.Assembly[]]) { 
-            ## This is what we expected, move along
-         } elseif($Assembly -as [String[]]) {
-            $Assembly = Get-Assembly $Assembly
-         } elseif(!$Assembly) {
-            $Assembly = [AppDomain]::CurrentDomain.GetAssemblies()
-         }
-
-         :asm foreach ($asm in $assembly) {
-            Write-Verbose "Testing Types from Assembly: $($asm.Location)"
-            if ($asm) { 
-               trap {
-                  if( $_.Exception.LoaderExceptions -and $_.Exception.LoaderExceptions[0] -is [System.IO.FileNotFoundException] ) {
-                     $PSCmdlet.WriteWarning( "Unable to load some types from $($asm.Location), required assemblies were not found. Use -Debug to see more detail")
-                     continue asm
-                  }
-                  Write-Error "Unable to load some types from $($asm.Location). Try with -Debug to see more detail"
-                  Write-Debug $( $_.Exception.LoaderExceptions | Out-String )
-                  continue asm
-               }
-               $asm.GetTypes() | Where {
-                  ( $Force -or $_.IsPublic ) -AND
-                  ( !$Namespace -or $( foreach($n in $Namespace) { $_.Namespace -like $n  } ) ) -AND
-                  ( !$TypeName -or $( foreach($n in $TypeName) { $_.Name -like $n -or $_.FullName -like $n } ) -contains $True ) -AND
-                  ( !$Attribute -or $( foreach($n in $Attribute) { $_.CustomAttributes | ForEach { $_.AttributeType.Name -like $n -or $_.AttributeType.FullName -like $n } } ) -contains $True ) -AND
-                  ( !$BaseType -or $( foreach($n in $BaseType) { $_.BaseType -like $n } ) -contains $True ) -AND
-                  ( !$Interface -or @( foreach($n in $Interface) { $_.GetInterfaces() -like $n } ).Count -gt 0 )
-               }
+    process {
+        $Cmdlet = $PSCmdlet
+        if($Cmdlet.ParameterSetName -eq 'Enum') {
+            if($Enum -is [Enum]) {
+                [Enum]::GetValues($enum.GetType())
+            } elseif($Enum -is [Type] -and $Enum.IsEnum) {
+                [Enum]::GetValues($enum)
+            } else {
+                throw "Specified Enum is neither an enum value nor an enumerable type"
             }
-         }
-      }
-   }
+        }
+        else {
+            if($Assembly -as [Reflection.Assembly[]]) { 
+                ## This is what we expected, move along
+            } elseif($Assembly -as [String[]]) {
+                $Assembly = Get-Assembly $Assembly
+            } elseif(!$Assembly) {
+                $Assembly = [AppDomain]::CurrentDomain.GetAssemblies()
+            }
+
+            :asm foreach ($asm in $assembly) {
+                Write-Verbose "Testing Types from Assembly: $($asm.Location)"
+                if ($asm) { 
+                    $asm.GetTypes().Where({
+                        $Type = $_
+                        trap {
+                            Write-Debug "Failure matching '$n'"
+                            if( $_.Exception.LoaderExceptions -and $_.Exception.LoaderExceptions[0] -is [System.IO.FileNotFoundException] ) {
+                                #$Cmdlet.WriteWarning( "Unable to load some types from $($asm.Location), required assemblies were not found. Use -Debug to see more detail")
+                                WriteError -Cmdlet $Cmdlet -Exception $_.Exception -Message "Unable to load $Type from $($asm.Location), required assembly not found. Check LoaderExceptions for details" -ErrorId "PathNotFound,Reflection\Get-Type" -Category ObjectNotFound
+                            } elseif( $_.Exception.LoaderExceptions ) {
+                                WriteError -Cmdlet $Cmdlet -Exception $_.Exception -Message "Unable to load $Type from $($asm.Location). Check LoaderExceptions for details." -ErrorId "LoadException,Reflection\Get-Type" -Category InvalidType
+                            } else {
+                                WriteError -Cmdlet $Cmdlet -Exception $_.Exception -Message "Unable to load $Type from $($asm.Location)." -ErrorId "TypeEvaluation,Reflection\Get-Type" -Category InvalidType
+                            }
+                            write-output $false
+                            continue
+                        }
+
+                        ( $Force -or $_.IsPublic ) -AND
+                        ( !$Namespace -or $( foreach($n in $Namespace) { $n = $n -replace "\[","``[" -replace "]","``]"; $_.Namespace -like $n  } ) ) -AND
+                        ( !$TypeName -or $( foreach($n in $TypeName)   { $n = $n -replace "\[","``[" -replace "]","``]"; $_.Name -like $n -or $_.FullName -like $n } ) -contains $True ) -AND
+                        ( !$Attribute -or $( foreach($n in $Attribute) { $n = $n -replace "\[","``[" -replace "]","``]"; $_.CustomAttributes | ForEach { $_.AttributeType.Name -like $n -or $_.AttributeType.FullName -like $n } } ) -contains $True ) -AND
+                        ( !$BaseType -or $( foreach($n in $BaseType)   { $n = $n -replace "\[","``[" -replace "]","``]"; $_.BaseType -like $n } ) -contains $True ) -AND
+                        ( !$Interface -or @( foreach($n in $Interface) { $n = $n -replace "\[","``[" -replace "]","``]"; $_.GetInterfaces() -like $n } ).Count -gt 0 )
+                    })
+                }
+            }
+        }
+    }
 }
 
 function Add-Assembly {
@@ -465,66 +472,179 @@ function Get-Method {
 # }
 
 function Get-MemberSignature {
-   <#
-      .Synopsis
-         Get the powershell signature for calling a member.
-   #>
-   [CmdletBinding(DefaultParameterSetName="CallSignature")]
-   param(
-      # The Method we're getting the signature for
-      [Parameter(ValueFromPipeline=$true,Mandatory=$true,Position=0)]
-      [System.Reflection.MethodBase]$MethodBase,
+    <#
+        .Synopsis
+            Get the powershell signature for calling a member.
+    #>
+    [CmdletBinding(DefaultParameterSetName="CallSignature")]
+    param(
+        # The Method we're getting the signature for
+        [Parameter(ValueFromPipeline=$true,Mandatory=$true,Position=0)]
+        [System.Reflection.MethodBase]$MethodBase,
 
-      [Parameter(Mandatory=$false, Position=1)]
-      [Type[]]$GenericArguments,
+        [Parameter(Mandatory=$false, Position=1)]
+        [Alias("GenericArguments")]
+        [Type[]]$GenericArgumentTypes,
       
-      # Return the simplified markup
-      [Parameter(ParameterSetName="CallSignature")]
-      [Switch]$Simple,
+        # Return the simplified markup
+        [Parameter(ParameterSetName="CallSignature")]
+        [Switch]$Simple,
       
-      # Return a param block
-      [Parameter(ParameterSetName="ParamBlock")]
-      [Switch]$ParamBlock
-   )
-   process {
-      if($PSCmdlet.ParameterSetName -eq "ParamBlock") { $Simple = $true }
+        # Return a param block
+        [Parameter(ParameterSetName="ParamBlock")]
+        [Switch]$ParamBlock,
 
-      $parameters = $(
-         foreach($param in $MethodBase.GetParameters()) {
-            # Write-Host $param.ParameterType.FullName.TrimEnd('&'), $param.Name -fore cyan
-              # Write-Verbose "$($param.ParameterType.UnderlyingSystemType.FullName) - $($param.ParameterType)"
-            $paramType = $param.ParameterType
+        [Parameter()]
+        [Switch]$AsExtensionMethod,
 
-            Write-Verbose "$(if($paramType.IsGenericType){'Generic: '})$($GenericArguments)"
-            if($paramType.IsGenericType -and $GenericArguments) {
-               try {
-                  $paramType = $paramType.GetGenericTypeDefinition().MakeGenericType( $GenericArguments )
-               } catch { continue }
+        [ref]$ConcreteArguments
+    )
+    process {
+        if($PSCmdlet.ParameterSetName -eq "ParamBlock") { $Simple = $true }
+        [Array]$GenericArguments = $MethodBase.GetGenericArguments()
+        if($PSBoundParameters.ContainsKey("ConcreteArguments")) {
+            $ConcreteArguments.Value = @("[PSObject]") * $GenericArguments.Length
+        }
+
+        Write-Verbose "GenericArguments: $($GenericArguments -join ', ')"
+        [int[]]$used = @()
+
+        $parameters = $MethodBase.GetParameters()
+        $parameters = $(
+            foreach($param in $parameters) {
+                # Write-Verbose "$($param.ParameterType.UnderlyingSystemType.FullName) - $($param.ParameterType)"
+                $paramType = $param.ParameterType
+                if($paramType.Name.EndsWith('&')) { $ref = '[ref]' } else { $ref = '' }
+                if($paramType.IsArray) { $array = ',' } else { $array = '' }
+
+                if($GenericArgumentTypes -and $GenericArguments) {
+                    if($paramType.IsGenericType) {
+                        try {
+                            $ga = 0
+                            $GenericType = @(
+                                foreach($typeArg in $paramType.GetGenericArguments()) {
+                                    $used += $index = [array]::IndexOf($GenericArguments, $typeArg)
+
+                                    if($index -lt 0) {
+                                        $typeArg
+                                    } else {
+                                        if($PSBoundParameters.ContainsKey("ConcreteArguments")) {
+                                            $ConcreteArguments.Value[$index] = "`$$($param.Name).GetType().GetGenericArguments()[$ga]"
+                                        }
+                                        $OutType = $GenericArgumentTypes[$index]
+                                        if($OutType.IsArray) {
+                                            $OutType.GetElementType()
+                                        } else {
+                                            $OutType
+                                        }
+                                    }
+                                    $ga++
+                                }
+                            )
+
+                            $paramType = $paramType.GetGenericTypeDefinition().MakeGenericType( $GenericType )
+                        } catch { 
+                            continue 
+                        }
+                    } elseif($paramType.IsGenericParameter) { 
+                        $used += $index = [array]::IndexOf($GenericArguments, $typeArg)
+                        $paramType = $GenericArgumentTypes[$index]
+                        if($PSBoundParameters.ContainsKey("ConcreteArguments")) {
+                            $ConcreteArguments.Value[$index] = "`$$($param.Name).GetType()"
+                        }
+                    }
+                } else {
+                    if($paramType.IsGenericType) {
+                        $GenericType = @(
+                            foreach($typeArg in $paramType.GetGenericArguments()) {
+                                if($typeArg.IsGenericParameter) { [PSObject] } else { $typeArg } 
+                            }
+                        )
+                        $paramType = $paramType.GetGenericTypeDefinition().MakeGenericType($GenericType)
+                    } elseif($paramType.IsGenericParameter) { 
+                        $paramType = [PSObject]
+                    }
+                }
+                New-Object PSObject -Property @{
+                    ParameterType = $paramType.ToString().TrimEnd('&')
+                    ParameterName = $param.Name
+                }
             }
-         
-            if($paramType.Name.EndsWith('&')) { $ref = '[ref]' } else { $ref = '' }
-            if($paramType.IsArray) { $array = ',' } else { $array = '' }
-            if($ParamBlock) { 
-               '[Parameter(Mandatory=$true)]{0}[{1}]${2}' -f $ref, $paramType.ToString().TrimEnd('&'), $param.Name
-            } elseif($Simple) { 
-               '[{0}] {2}' -f $paramType.ToString().TrimEnd('&'), $param.Name
-            } else {
-               '{0}({1}[{2}]${3})' -f $ref, $array, $paramType.ToString().TrimEnd('&'), $param.Name
+        )
+
+        if($GenericArgumentTypes -and $GenericArguments) {
+            $notUsed = @(0..($GenericArguments.Count-1) | Where-Object { $_ -notin $used })
+            if($notused.Count -gt 0) {
+                $i = 1
+                $Remaining = $GenericArgumentTypes[$notUsed] | % {
+                    New-Object PSObject -Property @{
+                        ParameterType = $_.ToString().TrimEnd('&')
+                        ParameterName = "GenericArgumentType$($i++)"
+                    }
+                }
+                $parameters = @(@($parameters) + @($Remaining))
             }
-         }
-      )
-      if($PSCmdlet.ParameterSetName -eq "ParamBlock") {
-         $parameters -join ', '
-      } elseif($MethodBase.IsConstructor) {
-         "New-Object $($MethodBase.ReflectedType.FullName) $($parameters -join ', ')"
-      } elseif($Simple) {
-         "$($MethodBase.ReturnType.FullName) $($MethodBase.Name)($($parameters -join ', '))"
-      } elseif($MethodBase.IsStatic) {
-         "[$($MethodBase.ReturnType.FullName)] [$($MethodBase.ReflectedType.FullName)]::$($MethodBase.Name)($($parameters -join ', '))"
-      } else {
-         "[$($MethodBase.ReturnType.FullName)] `$$($MethodBase.ReflectedType.Name)Object.$($MethodBase.Name)($($parameters -join ', '))"
-      }
-   }
+        }
+
+        $parameters = $(
+            foreach($paramType in $parameters) {
+                if($ParamBlock) { 
+                    '[Parameter(Mandatory=$true)]{0}[{1}]${2}' -f $ref, $paramType.ParameterType, $paramType.ParameterName
+                } elseif($Simple) { 
+                    '[{0}]${1}' -f $paramType.ParameterType, $paramType.ParameterName
+                } else {
+                    '{0}({1}[{2}]${3})' -f $ref, $array, $paramType.ParameterType, $paramType.ParameterName
+                }
+            }
+        )
+
+        # For extension methods, we need to push "this" to the end, because we won't ever specify it
+        if($ParamBlock -and ($AsExtensionMethod -or ($MethodBase.CustomAttributes | ForEach-Object { $_.AttributeType -eq [System.Runtime.CompilerServices.ExtensionAttribute]}) -contains $true)) {
+            $thispar, $parameters = $parameters
+            $thispar = "$thispar = `$this" -replace 'Mandatory=\$true'
+            $parameters = @($parameters) + @($thispar) | Where { $_ }
+        }
+
+        $ReturnType = $MethodBase.ReturnType
+        if($GenericArgumentTypes -and $GenericArguments) {
+            if($returnType.IsGenericType) {
+                try {
+                    $GenericType = @(foreach($typeArg in $returnType.GetGenericArguments()) {
+                        $used += $index = [array]::IndexOf($GenericArguments, $typeArg)
+                        if($index -lt 0) {
+                            $typeArg
+                        } else {
+                            $GenericArgumentTypes[$index]
+                        }
+                    })
+
+                    $returnType = $returnType.GetGenericTypeDefinition().MakeGenericType( $GenericType )
+                } catch { continue }
+            } elseif($returnType.IsGenericParameter) { 
+                $used += $index = [array]::IndexOf($GenericArguments, $typeArg)
+                $returnType = $GenericArgumentTypes[$index]
+            }
+        } else {
+            if($returnType.IsGenericType) {
+                $returnType = $returnType.GetGenericTypeDefinition().MakeGenericType(@($returnType.GetGenericArguments() | % { if($_.IsGenericParameter) { [PSObject] } else { $_ } } ))
+            } elseif($returnType.IsGenericParameter) { 
+                $returnType = [PSObject]
+            }
+        }
+
+
+        if($ParamBlock) {
+            $parameters -join ', '
+        } elseif($MethodBase.IsConstructor) {
+            "New-Object $($MethodBase.ReflectedType.FullName) $($parameters -join ', ')"
+        } elseif($Simple) {
+            "<# [$($ReturnType.FullName)] #> $($MethodBase.Name)($($parameters -join ', '))"
+        } elseif($MethodBase.IsStatic) {
+            "<# [$($ReturnType.FullName)] #> [$($MethodBase.ReflectedType.FullName)]::$($MethodBase.Name)($($parameters -join ', '))"
+        } else {
+            "<# [$($ReturnType.FullName)] #> `$$($MethodBase.ReflectedType.Name)Object.$($MethodBase.Name)($($parameters -join ', '))"
+        }
+    }
 }
 
 function Read-Choice {
@@ -869,99 +989,176 @@ function Invoke-Member {
 }
 
 function Invoke-Generic {
-   #.Synopsis
-   #  Invoke Generic method definitions via reflection:
-   [CmdletBinding()]
-   param( 
-      [Parameter(Position=0,Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
-      [Alias('On')]
-      $InputObject,
+    #.Synopsis
+    #  Invoke Generic method definitions via reflection:
+    [CmdletBinding()]
+    param( 
+        [Parameter(Position=0,Mandatory=$true,ValueFromPipelineByPropertyName=$true)]
+        [Alias('On')]
+        $InputObject,
 
-      [Parameter(Position=1,ValueFromPipelineByPropertyName=$true)]
-      [Alias('Named')]
-      [string]$MethodName,
+        [Parameter(Position=1,ValueFromPipelineByPropertyName=$true)]
+        [Alias('Named')]
+        [string]$MethodName,
 
-      [Parameter(Position=2)]
-      [Alias("Types")]
-      [Type[]]$ParameterTypes,
+        [Parameter(Position=2)]
+        [Alias("Types","ParameterTypes")]
+        [Type[]]$GenericArgumentTypes,
 
-      [Parameter(Position=4, ValueFromRemainingArguments=$true, ValueFromPipelineByPropertyName=$true)]
-      [Object[]]$WithArgs,
+        [Parameter(Position=4, ValueFromRemainingArguments=$true, ValueFromPipelineByPropertyName=$true)]
+        [Object[]]$WithArgs,
 
-      [Switch]$Static
-   )
-   begin {
-      if($Static) {
-         $BindingFlags = [System.Reflection.BindingFlags]"IgnoreCase,Public,Static"
-      } else {
-         $BindingFlags = [System.Reflection.BindingFlags]"IgnoreCase,Public,Instance"
-      }
-   }
-   process {
-      $Type = $InputObject -as [Type]
-      if(!$Type) { $Type = $InputObject.GetType() }
+        [Switch]$Static
+    )
+    begin {
+        if($Static) {
+            $BindingFlags = [System.Reflection.BindingFlags]"IgnoreCase,Public,Static"
+        } else {
+            $BindingFlags = [System.Reflection.BindingFlags]"IgnoreCase,Public,Instance"
+        }
+    }
+    process {
+        $Type = $InputObject -as [Type]
+        if(!$Type) { $Type = $InputObject.GetType() }
+
+        if($Static) { $InputObject = $Type }
+
+
+        if($WithArgs -and -not $GenericArgumentTypes) {
+            $GenericArgumentTypes = $withArgs | % { $_.GetType() }
+        } elseif(!$GenericArgumentTypes) {
+            $GenericArgumentTypes = [Type]::EmptyTypes
+        }   
       
-      if($WithArgs -and -not $ParameterTypes) {
-         $ParameterTypes = $withArgs | % { $_.GetType() }
-      } elseif(!$ParameterTypes) {
-         $ParameterTypes = [Type]::EmptyTypes
-      }   
       
-      
-      trap { continue }
-      $MemberInfo = $Type.GetMethod($MethodName, $BindingFlags)
-      if(!$MemberInfo) {
-         $MemberInfo = $Type.GetMethod($MethodName, $BindingFlags, $null, $NonGenericArgumentTypes, $null)
-      }
-      if(!$MemberInfo) {
-         $MemberInfo = $Type.GetMethods($BindingFlags) | Where-Object {
-            $MI = $_
-            [bool]$Accept = $MI.Name -eq $MethodName
-            if($Accept){
-            Write-Verbose "$Accept = $($MI.Name) -eq $($MethodName)"
-               [Array]$GenericTypes = @($MI.GetGenericArguments() | Select -Expand Name)
-               [Array]$Parameters = @($MI.GetParameters() | Add-Member ScriptProperty -Name IsGeneric -Value { 
-                                          $GenericTypes -Contains $this.ParameterType 
-                                       } -Passthru)
+        trap { continue }
+        $MemberInfo = $Type.GetMethod($MethodName, $BindingFlags)
+        if(!$MemberInfo) {
+            Write-Debug "Method not found, try with types"
+            $MemberInfo = $Type.GetMethod($MethodName, $BindingFlags, $null, $GenericArgumentTypes, $null)
+        }
+        if(!$MemberInfo) {
+            Write-Debug "Method not found, search by name for $Type.'$MethodName' ..."
+            $MemberInfo = $Type.GetMethods($BindingFlags) | Where-Object {
+                $MI = $_
 
-                                       $Accept = $ParameterTypes.Count -eq $Parameters.Count
-               Write-Verbose "  $Accept = $($Parameters.Count) Arguments"
-               if($Accept) {
-                  for($i=0;$i -lt $Parameters.Count;$i++) {
-                     $Accept = $Accept -and ( $Parameters[$i].IsGeneric -or ($ParameterTypes[$i] -eq $Parameters[$i].ParameterType))
-                     Write-Verbose "   $Accept =$(if($Parameters[$i].IsGeneric){' GENERIC or'}) $($ParameterTypes[$i]) -eq $($Parameters[$i].ParameterType)"
-                  }
-               }
+                [bool]$Accept = $MI.Name -eq $MethodName
+                if(!$Accept){ return $false }
+
+                Write-Debug "Matching name found $($MethodName), counting parameters (looking for $($GenericArgumentTypes.Count):  $($GenericArgumentTypes -join ','))"
+
+                [Array]$GenericArguments = $MI.GetGenericArguments()
+                [Array]$Parameters = $MI.GetParameters()
+
+                # The number of generic arguments should match the number provided
+                $Accept = $Accept -and ($GenericArgumentTypes.Count -eq $GenericArguments.Count)
+                Write-Verbose "  $Accept = $($GenericArgumentTypes.Count) -eq $($GenericArguments.Count) GenericArguments"
+
+                # The number of parameters should match the number provides
+                $Accept = $WithArgs.Count -eq $Parameters.Count
+                Write-Verbose "  $Accept = $($WithArgs.Count) -eq $($Parameters.Count) Parameters"
+
+                if(!$Accept){ return $false }
+
+                # Check the parameters more carefully?
+                for($i=0;$i -lt $Parameters.Count;$i++) {
+                    $type = $Parameters[$i].ParameterType
+
+                    if( $Type.IsGenericType ) {
+
+                        foreach($typeArg in $Type.GetGenericArguments()) {
+                            $GenericType = $GenericArgumentTypes[ ([array]::IndexOf($GenericArguments, $typeArg)) ]
+                        }
+
+                        if($GenericType.IsArray) {
+                            try {
+                                $ConcreteType = $Type.GetGenericTypeDefinition().MakeGenericType( $GenericType.GetElementType() )
+                            } finally {
+                                if( !$ConcreteType.IsAssignableFrom($WithArgs[$i].GetType()) ) {
+                                    Write-Verbose "Parameter $i of $Type is not assignable from $($WithArgs[$i].GetType())"
+                                    try {
+                                        $ConcreteType = $Type.GetGenericTypeDefinition().MakeGenericType( $GenericType )
+                                    } catch {}
+                                }
+                            }
+                        } else {
+                            try {
+                                $ConcreteType = $Type.GetGenericTypeDefinition().MakeGenericType( $GenericType )
+                            } catch {}
+                        }
+
+                        if( !$ConcreteType.IsAssignableFrom($WithArgs[$i].GetType()) ) {
+                            Write-Verbose "Parameter $i of $Type is not assignable from $($WithArgs[$i].GetType())"
+                            return $False
+                        }
+                    } elseif($Type.IsGenericParameter) {
+                        $ConcreteType = $GenericArgumentTypes[ ([array]::IndexOf($GenericArguments, $typeArg)) ]
+                    }
+                    Write-Verbose "Parameter $i of type $ConcreteType"
+                }
+                return $true
+            } | Select -First 1
+        }
+        if(!$MemberInfo) {
+            throw "Cannot find the right method..."
+        }
+        Write-Verbose "Make Generic Method for $MemberInfo"
+
+        # [Type[]]$GenericParameters = @()
+        # [Array]$ConcreteTypes = @($MemberInfo.GetParameters() | Select -Expand ParameterType)
+        # for($i=0;$i -lt $GenericArgumentTypes.Count;$i++){
+        #     Write-Verbose "$($GenericArgumentTypes[$i]) ? $($ConcreteTypes[$i] -eq $GenericArgumentTypes[$i])"
+        #     if($ConcreteTypes[$i] -ne $GenericArgumentTypes[$i]) {
+        #         $GenericParameters += $GenericArgumentTypes[$i]
+        #     }
+        #     $GenericArgumentTypes[$i] = Add-Member -in $GenericArgumentTypes[$i] -Type NoteProperty -Name IsGeneric -Value $($ConcreteTypes[$i] -ne $GenericArgumentTypes[$i]) -Passthru
+        # }
+
+        # $GenericArgumentTypes | Where-Object { $_.IsGeneric }
+        # Write-Verbose "$($GenericParameters -join ', ') generic parameters"
+
+        # Because so many generic methods are IEnumerable...
+
+        $ElementTypes = if($WithArgs) {
+            foreach($GenericType in $GenericArgumentTypes) {
+                if($GenericType.IsArray) {
+                    $GenericType.GetElementType()
+                } else {
+                    $GenericType
+                }
             }
-            return $Accept
-         } | Sort { @($_.GetGenericArguments()).Count } | Select -First 1
-      }
-      Write-Verbose "Time to make generic methods."
-      Write-Verbose $MemberInfo
-      [Type[]]$GenericParameters = @()
-      [Array]$ConcreteTypes = @($MemberInfo.GetParameters() | Select -Expand ParameterType)
-      for($i=0;$i -lt $ParameterTypes.Count;$i++){
-         Write-Verbose "$($ParameterTypes[$i]) ? $($ConcreteTypes[$i] -eq $ParameterTypes[$i])"
-         if($ConcreteTypes[$i] -ne $ParameterTypes[$i]) {
-            $GenericParameters += $ParameterTypes[$i]
-         }
-         $ParameterTypes[$i] = Add-Member -in $ParameterTypes[$i] -Type NoteProperty -Name IsGeneric -Value $($ConcreteTypes[$i] -ne $ParameterTypes[$i]) -Passthru
-      }
+        } else {
+            $GenericArgumentTypes
+        }
 
-       $ParameterTypes | Where-Object { $_.IsGeneric }
-      Write-Verbose "$($GenericParameters -join ', ') generic parameters"
+        try {
+            $MemberInfo = $MemberInfo.MakeGenericMethod( $ElementTypes )
+            $AlternateMemberInfo = $MemberInfo.MakeGenericMethod( $GenericArgumentTypes )
+        } catch {
+            $MemberInfo = $MemberInfo.MakeGenericMethod( $GenericArgumentTypes )
+        }
 
-      $MemberInfo = $MemberInfo.MakeGenericMethod( $GenericParameters )
-      Write-Verbose $MemberInfo
 
-      if($WithArgs) {
-         [Object[]]$Arguments = $withArgs | %{ $_.PSObject.BaseObject }
-         Write-Verbose "Arguments: $(($Arguments | %{ $_.GetType().Name }) -Join ', ')"
-         $MemberInfo.Invoke( $InputObject, $Arguments )
-      } else {
-         $MemberInfo.Invoke( $InputObject )
-      }
-   } 
+        if($WithArgs) {
+            [Object[]]$Arguments = @();
+            foreach($arg in $withArgs) {
+                $Arguments += ,($arg | %{ $_.PSObject.BaseObject })
+            }
+            Write-Verbose "Arguments: $($(foreach($arg in $withArgs) { $arg.GetType().Name }) -Join ', ')"
+            $Global:MemberInfo = $MemberInfo
+            $Global:Type = $InputObject
+            $Global:Arguments = $Arguments
+            try {
+                $MemberInfo.Invoke( $InputObject, $Arguments )
+            } catch {
+                if($AlternateMemberInfo) {
+                    $AlternateMemberInfo.Invoke( $InputObject, $Arguments )
+                }
+            }
+        } else {
+            $MemberInfo.Invoke( $InputObject )
+        }
+    } 
 }
 
 ###############################################################################
@@ -1915,138 +2112,141 @@ function New-ModuleManifestFromSnapin {
    }
 }
 
+
+# Utility to throw an errorrecord
+function ThrowError {
+    <#
+        .Synopsis
+            Throw a terminating error
+    #>
+    param
+    (        
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [System.Management.Automation.PSCmdlet]
+        $Cmdlet = $((Get-Variable -Scope 1 PSCmdlet).Value),
+
+        [Parameter(Mandatory = $true, ParameterSetName="ExistingException", Position=1, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
+        [Parameter(ParameterSetName="NewException")]
+        [ValidateNotNullOrEmpty()]
+        [System.Exception]
+        $Exception,
+
+        [Parameter(ParameterSetName="NewException", Position=2)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]        
+        $ExceptionType="System.Management.Automation.RuntimeException",
+
+        [Parameter(Mandatory = $true, ParameterSetName="NewException", Position=3)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]
+        $Message,
+        
+        [Parameter(Mandatory = $false)]
+        [System.Object]
+        $TargetObject,
+        
+        [Parameter(Mandatory = $true, ParameterSetName="ExistingException", Position=10)]
+        [Parameter(Mandatory = $true, ParameterSetName="NewException", Position=10)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]
+        $ErrorId,
+
+        [Parameter(Mandatory = $true, ParameterSetName="ExistingException", Position=11)]
+        [Parameter(Mandatory = $true, ParameterSetName="NewException", Position=11)]
+        [ValidateNotNull()]
+        [System.Management.Automation.ErrorCategory]
+        $Category,
+
+        [Parameter(Mandatory = $true, ParameterSetName="Rethrow", Position=1)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    ) 
+    process {
+        if(!$ErrorRecord) {
+            if($PSCmdlet.ParameterSetName -eq "NewException") {
+                if($Exception) {
+                    $Exception = New-Object $ExceptionType $Message, $Exception
+                } else {
+                    $Exception = New-Object $ExceptionType $Message
+                }
+            }
+            $errorRecord = New-Object System.Management.Automation.ErrorRecord $Exception, $ErrorId, $Category, $TargetObject
+        }
+        $Cmdlet.ThrowTerminatingError($errorRecord)
+    }
+}
+
+# Utility to throw an errorrecord
+function WriteError {
+    <#
+        .Synopsis
+            Make writing proper errors easier
+        .Example
+            WriteError -ExceptionType System.Management.Automation.ItemNotFoundException `
+                       -Message "Can't find settings file $Path" `
+                       -ErrorId "PathNotFound,Metadata\Import-Metadata" `
+                       -Category "ObjectNotFound"
+    #>
+    param
+    (        
+        [Parameter()]
+        [ValidateNotNullOrEmpty()]
+        [System.Management.Automation.PSCmdlet]
+        $Cmdlet = $((Get-Variable -Scope 1 PSCmdlet).Value),
+
+        [Parameter(Mandatory = $true, ParameterSetName="ExistingException", Position=1, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
+        [Parameter(ParameterSetName="NewException")]
+        [ValidateNotNullOrEmpty()]
+        [System.Exception]
+        $Exception,
+
+        [Parameter(ParameterSetName="NewException", Position=2)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]        
+        $ExceptionType="System.Management.Automation.RuntimeException",
+
+        [Parameter(Mandatory = $true, ParameterSetName="NewException", Position=3)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]
+        $Message,
+        
+        [Parameter(Mandatory = $false)]
+        [System.Object]
+        $TargetObject,
+        
+        [Parameter(Mandatory = $true, Position=10)]
+        [ValidateNotNullOrEmpty()]
+        [System.String]
+        $ErrorId,
+
+        [Parameter(Mandatory = $true, Position=11)]
+        [ValidateNotNull()]
+        [System.Management.Automation.ErrorCategory]
+        $Category,
+
+        [Parameter(Mandatory = $true, ParameterSetName="Rethrow", Position=1)]
+        [System.Management.Automation.ErrorRecord]$ErrorRecord
+    ) 
+    process {
+        if(!$ErrorRecord) {
+            if($PSCmdlet.ParameterSetName -eq "NewException") {
+                if($Exception) {
+                    $Exception = New-Object $ExceptionType $Message, $Exception
+                } else {
+                    $Exception = New-Object $ExceptionType $Message
+                }
+            }
+            $errorRecord = New-Object System.Management.Automation.ErrorRecord $Exception, $ErrorId, $Category, $TargetObject
+        }
+        $Cmdlet.WriteError($errorRecord)
+    }
+}
+
+
+
 Set-Alias aasm Add-Assembly
 Set-Alias gt Get-Type
 Set-Alias gasm Get-Assembly
 Set-Alias gctor Get-Constructor
 
 Update-TypeData -MemberType ScriptProperty -MemberName TokenType -Value { $this.GetType().FullName } -TypeName System.Management.Automation.Language.Ast -Force
-# SIG # Begin signature block
-# MIIXxAYJKoZIhvcNAQcCoIIXtTCCF7ECAQExCzAJBgUrDgMCGgUAMGkGCisGAQQB
-# gjcCAQSgWzBZMDQGCisGAQQBgjcCAR4wJgIDAQAABBAfzDtgWUsITrck0sYpfvNR
-# AgEAAgEAAgEAAgEAAgEAMCEwCQYFKw4DAhoFAAQUmu3qJ4SrrX7WRYIiQZLH8y1P
-# JA+gghL3MIID7jCCA1egAwIBAgIQfpPr+3zGTlnqS5p31Ab8OzANBgkqhkiG9w0B
-# AQUFADCBizELMAkGA1UEBhMCWkExFTATBgNVBAgTDFdlc3Rlcm4gQ2FwZTEUMBIG
-# A1UEBxMLRHVyYmFudmlsbGUxDzANBgNVBAoTBlRoYXd0ZTEdMBsGA1UECxMUVGhh
-# d3RlIENlcnRpZmljYXRpb24xHzAdBgNVBAMTFlRoYXd0ZSBUaW1lc3RhbXBpbmcg
-# Q0EwHhcNMTIxMjIxMDAwMDAwWhcNMjAxMjMwMjM1OTU5WjBeMQswCQYDVQQGEwJV
-# UzEdMBsGA1UEChMUU3ltYW50ZWMgQ29ycG9yYXRpb24xMDAuBgNVBAMTJ1N5bWFu
-# dGVjIFRpbWUgU3RhbXBpbmcgU2VydmljZXMgQ0EgLSBHMjCCASIwDQYJKoZIhvcN
-# AQEBBQADggEPADCCAQoCggEBALGss0lUS5ccEgrYJXmRIlcqb9y4JsRDc2vCvy5Q
-# WvsUwnaOQwElQ7Sh4kX06Ld7w3TMIte0lAAC903tv7S3RCRrzV9FO9FEzkMScxeC
-# i2m0K8uZHqxyGyZNcR+xMd37UWECU6aq9UksBXhFpS+JzueZ5/6M4lc/PcaS3Er4
-# ezPkeQr78HWIQZz/xQNRmarXbJ+TaYdlKYOFwmAUxMjJOxTawIHwHw103pIiq8r3
-# +3R8J+b3Sht/p8OeLa6K6qbmqicWfWH3mHERvOJQoUvlXfrlDqcsn6plINPYlujI
-# fKVOSET/GeJEB5IL12iEgF1qeGRFzWBGflTBE3zFefHJwXECAwEAAaOB+jCB9zAd
-# BgNVHQ4EFgQUX5r1blzMzHSa1N197z/b7EyALt0wMgYIKwYBBQUHAQEEJjAkMCIG
-# CCsGAQUFBzABhhZodHRwOi8vb2NzcC50aGF3dGUuY29tMBIGA1UdEwEB/wQIMAYB
-# Af8CAQAwPwYDVR0fBDgwNjA0oDKgMIYuaHR0cDovL2NybC50aGF3dGUuY29tL1Ro
-# YXd0ZVRpbWVzdGFtcGluZ0NBLmNybDATBgNVHSUEDDAKBggrBgEFBQcDCDAOBgNV
-# HQ8BAf8EBAMCAQYwKAYDVR0RBCEwH6QdMBsxGTAXBgNVBAMTEFRpbWVTdGFtcC0y
-# MDQ4LTEwDQYJKoZIhvcNAQEFBQADgYEAAwmbj3nvf1kwqu9otfrjCR27T4IGXTdf
-# plKfFo3qHJIJRG71betYfDDo+WmNI3MLEm9Hqa45EfgqsZuwGsOO61mWAK3ODE2y
-# 0DGmCFwqevzieh1XTKhlGOl5QGIllm7HxzdqgyEIjkHq3dlXPx13SYcqFgZepjhq
-# IhKjURmDfrYwggSjMIIDi6ADAgECAhAOz/Q4yP6/NW4E2GqYGxpQMA0GCSqGSIb3
-# DQEBBQUAMF4xCzAJBgNVBAYTAlVTMR0wGwYDVQQKExRTeW1hbnRlYyBDb3Jwb3Jh
-# dGlvbjEwMC4GA1UEAxMnU3ltYW50ZWMgVGltZSBTdGFtcGluZyBTZXJ2aWNlcyBD
-# QSAtIEcyMB4XDTEyMTAxODAwMDAwMFoXDTIwMTIyOTIzNTk1OVowYjELMAkGA1UE
-# BhMCVVMxHTAbBgNVBAoTFFN5bWFudGVjIENvcnBvcmF0aW9uMTQwMgYDVQQDEytT
-# eW1hbnRlYyBUaW1lIFN0YW1waW5nIFNlcnZpY2VzIFNpZ25lciAtIEc0MIIBIjAN
-# BgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAomMLOUS4uyOnREm7Dv+h8GEKU5Ow
-# mNutLA9KxW7/hjxTVQ8VzgQ/K/2plpbZvmF5C1vJTIZ25eBDSyKV7sIrQ8Gf2Gi0
-# jkBP7oU4uRHFI/JkWPAVMm9OV6GuiKQC1yoezUvh3WPVF4kyW7BemVqonShQDhfu
-# ltthO0VRHc8SVguSR/yrrvZmPUescHLnkudfzRC5xINklBm9JYDh6NIipdC6Anqh
-# d5NbZcPuF3S8QYYq3AhMjJKMkS2ed0QfaNaodHfbDlsyi1aLM73ZY8hJnTrFxeoz
-# C9Lxoxv0i77Zs1eLO94Ep3oisiSuLsdwxb5OgyYI+wu9qU+ZCOEQKHKqzQIDAQAB
-# o4IBVzCCAVMwDAYDVR0TAQH/BAIwADAWBgNVHSUBAf8EDDAKBggrBgEFBQcDCDAO
-# BgNVHQ8BAf8EBAMCB4AwcwYIKwYBBQUHAQEEZzBlMCoGCCsGAQUFBzABhh5odHRw
-# Oi8vdHMtb2NzcC53cy5zeW1hbnRlYy5jb20wNwYIKwYBBQUHMAKGK2h0dHA6Ly90
-# cy1haWEud3Muc3ltYW50ZWMuY29tL3Rzcy1jYS1nMi5jZXIwPAYDVR0fBDUwMzAx
-# oC+gLYYraHR0cDovL3RzLWNybC53cy5zeW1hbnRlYy5jb20vdHNzLWNhLWcyLmNy
-# bDAoBgNVHREEITAfpB0wGzEZMBcGA1UEAxMQVGltZVN0YW1wLTIwNDgtMjAdBgNV
-# HQ4EFgQURsZpow5KFB7VTNpSYxc/Xja8DeYwHwYDVR0jBBgwFoAUX5r1blzMzHSa
-# 1N197z/b7EyALt0wDQYJKoZIhvcNAQEFBQADggEBAHg7tJEqAEzwj2IwN3ijhCcH
-# bxiy3iXcoNSUA6qGTiWfmkADHN3O43nLIWgG2rYytG2/9CwmYzPkSWRtDebDZw73
-# BaQ1bHyJFsbpst+y6d0gxnEPzZV03LZc3r03H0N45ni1zSgEIKOq8UvEiCmRDoDR
-# EfzdXHZuT14ORUZBbg2w6jiasTraCXEQ/Bx5tIB7rGn0/Zy2DBYr8X9bCT2bW+IW
-# yhOBbQAuOA2oKY8s4bL0WqkBrxWcLC9JG9siu8P+eJRRw4axgohd8D20UaF5Mysu
-# e7ncIAkTcetqGVvP6KUwVyyJST+5z3/Jvz4iaGNTmr1pdKzFHTx/kuDDvBzYBHUw
-# ggUmMIIEDqADAgECAhACXbrxBhFj1/jVxh2rtd9BMA0GCSqGSIb3DQEBCwUAMHIx
-# CzAJBgNVBAYTAlVTMRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3
-# dy5kaWdpY2VydC5jb20xMTAvBgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJ
-# RCBDb2RlIFNpZ25pbmcgQ0EwHhcNMTUwNTA0MDAwMDAwWhcNMTYwNTExMTIwMDAw
-# WjBtMQswCQYDVQQGEwJVUzERMA8GA1UECBMITmV3IFlvcmsxFzAVBgNVBAcTDldl
-# c3QgSGVucmlldHRhMRgwFgYDVQQKEw9Kb2VsIEguIEJlbm5ldHQxGDAWBgNVBAMT
-# D0pvZWwgSC4gQmVubmV0dDCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEB
-# AJfRKhfiDjMovUELYgagznWf+HFcDENk118Y/K6UkQDwKmVyVOvDyaVefjSmZZcV
-# NZqqYpm9d/Iajf2dauyC3pg3oay8KfXAADLHgbmbvYDc5zGuUNsTzMUOKlp9h13c
-# qsg898JwpRpI659xCQgJjZ6V83QJh+wnHvjA9ojjA4xkbwhGp4Eit6B/uGthEA11
-# IHcFcXeNI3fIkbwWiAw7ZoFtSLm688NFhxwm+JH3Xwj0HxuezsmU0Yc/po31CoST
-# nGPVN8wppHYZ0GfPwuNK4TwaI0FEXxwdwB+mEduxa5e4zB8DyUZByFW338XkGfc1
-# qcJJ+WTyNKFN7saevhwp02cCAwEAAaOCAbswggG3MB8GA1UdIwQYMBaAFFrEuXsq
-# CqOl6nEDwGD5LfZldQ5YMB0GA1UdDgQWBBQV0aryV1RTeVOG+wlr2Z2bOVFAbTAO
-# BgNVHQ8BAf8EBAMCB4AwEwYDVR0lBAwwCgYIKwYBBQUHAwMwdwYDVR0fBHAwbjA1
-# oDOgMYYvaHR0cDovL2NybDMuZGlnaWNlcnQuY29tL3NoYTItYXNzdXJlZC1jcy1n
-# MS5jcmwwNaAzoDGGL2h0dHA6Ly9jcmw0LmRpZ2ljZXJ0LmNvbS9zaGEyLWFzc3Vy
-# ZWQtY3MtZzEuY3JsMEIGA1UdIAQ7MDkwNwYJYIZIAYb9bAMBMCowKAYIKwYBBQUH
-# AgEWHGh0dHBzOi8vd3d3LmRpZ2ljZXJ0LmNvbS9DUFMwgYQGCCsGAQUFBwEBBHgw
-# djAkBggrBgEFBQcwAYYYaHR0cDovL29jc3AuZGlnaWNlcnQuY29tME4GCCsGAQUF
-# BzAChkJodHRwOi8vY2FjZXJ0cy5kaWdpY2VydC5jb20vRGlnaUNlcnRTSEEyQXNz
-# dXJlZElEQ29kZVNpZ25pbmdDQS5jcnQwDAYDVR0TAQH/BAIwADANBgkqhkiG9w0B
-# AQsFAAOCAQEAIi5p+6eRu6bMOSwJt9HSBkGbaPZlqKkMd4e6AyKIqCRabyjLISwd
-# i32p8AT7r2oOubFy+R1LmbBMaPXORLLO9N88qxmJfwFSd+ZzfALevANdbGNp9+6A
-# khe3PiR0+eL8ZM5gPJv26OvpYaRebJTfU++T1sS5dYaPAztMNsDzY3krc92O27AS
-# WjTjWeILSryqRHXyj8KQbYyWpnG2gWRibjXi5ofL+BHyJQRET5pZbERvl2l9Bo4Z
-# st8CM9EQDrdG2vhELNiA6jwenxNPOa6tPkgf8cH8qpGRBVr9yuTMSHS1p9Rc+ybx
-# FSKiZkOw8iCR6ZQIeKkSVdwFf8V+HHPrETCCBTAwggQYoAMCAQICEAQJGBtf1btm
-# dVNDtW+VUAgwDQYJKoZIhvcNAQELBQAwZTELMAkGA1UEBhMCVVMxFTATBgNVBAoT
-# DERpZ2lDZXJ0IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTEkMCIGA1UE
-# AxMbRGlnaUNlcnQgQXNzdXJlZCBJRCBSb290IENBMB4XDTEzMTAyMjEyMDAwMFoX
-# DTI4MTAyMjEyMDAwMFowcjELMAkGA1UEBhMCVVMxFTATBgNVBAoTDERpZ2lDZXJ0
-# IEluYzEZMBcGA1UECxMQd3d3LmRpZ2ljZXJ0LmNvbTExMC8GA1UEAxMoRGlnaUNl
-# cnQgU0hBMiBBc3N1cmVkIElEIENvZGUgU2lnbmluZyBDQTCCASIwDQYJKoZIhvcN
-# AQEBBQADggEPADCCAQoCggEBAPjTsxx/DhGvZ3cH0wsxSRnP0PtFmbE620T1f+Wo
-# ndsy13Hqdp0FLreP+pJDwKX5idQ3Gde2qvCchqXYJawOeSg6funRZ9PG+yknx9N7
-# I5TkkSOWkHeC+aGEI2YSVDNQdLEoJrskacLCUvIUZ4qJRdQtoaPpiCwgla4cSocI
-# 3wz14k1gGL6qxLKucDFmM3E+rHCiq85/6XzLkqHlOzEcz+ryCuRXu0q16XTmK/5s
-# y350OTYNkO/ktU6kqepqCquE86xnTrXE94zRICUj6whkPlKWwfIPEvTFjg/Bougs
-# UfdzvL2FsWKDc0GCB+Q4i2pzINAPZHM8np+mM6n9Gd8lk9ECAwEAAaOCAc0wggHJ
-# MBIGA1UdEwEB/wQIMAYBAf8CAQAwDgYDVR0PAQH/BAQDAgGGMBMGA1UdJQQMMAoG
-# CCsGAQUFBwMDMHkGCCsGAQUFBwEBBG0wazAkBggrBgEFBQcwAYYYaHR0cDovL29j
-# c3AuZGlnaWNlcnQuY29tMEMGCCsGAQUFBzAChjdodHRwOi8vY2FjZXJ0cy5kaWdp
-# Y2VydC5jb20vRGlnaUNlcnRBc3N1cmVkSURSb290Q0EuY3J0MIGBBgNVHR8EejB4
-# MDqgOKA2hjRodHRwOi8vY3JsNC5kaWdpY2VydC5jb20vRGlnaUNlcnRBc3N1cmVk
-# SURSb290Q0EuY3JsMDqgOKA2hjRodHRwOi8vY3JsMy5kaWdpY2VydC5jb20vRGln
-# aUNlcnRBc3N1cmVkSURSb290Q0EuY3JsME8GA1UdIARIMEYwOAYKYIZIAYb9bAAC
-# BDAqMCgGCCsGAQUFBwIBFhxodHRwczovL3d3dy5kaWdpY2VydC5jb20vQ1BTMAoG
-# CGCGSAGG/WwDMB0GA1UdDgQWBBRaxLl7KgqjpepxA8Bg+S32ZXUOWDAfBgNVHSME
-# GDAWgBRF66Kv9JLLgjEtUYunpyGd823IDzANBgkqhkiG9w0BAQsFAAOCAQEAPuwN
-# WiSz8yLRFcgsfCUpdqgdXRwtOhrE7zBh134LYP3DPQ/Er4v97yrfIFU3sOH20ZJ1
-# D1G0bqWOWuJeJIFOEKTuP3GOYw4TS63XX0R58zYUBor3nEZOXP+QsRsHDpEV+7qv
-# tVHCjSSuJMbHJyqhKSgaOnEoAjwukaPAJRHinBRHoXpoaK+bp1wgXNlxsQyPu6j4
-# xRJon89Ay0BEpRPw5mQMJQhCMrI2iiQC/i9yfhzXSUWW6Fkd6fp0ZGuy62ZD2rOw
-# jNXpDd32ASDOmTFjPQgaGLOBm0/GkxAG/AeB+ova+YJJ92JuoVP6EpQYhS6Skepo
-# bEQysmah5xikmmRR7zGCBDcwggQzAgEBMIGGMHIxCzAJBgNVBAYTAlVTMRUwEwYD
-# VQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5jb20xMTAv
-# BgNVBAMTKERpZ2lDZXJ0IFNIQTIgQXNzdXJlZCBJRCBDb2RlIFNpZ25pbmcgQ0EC
-# EAJduvEGEWPX+NXGHau130EwCQYFKw4DAhoFAKB4MBgGCisGAQQBgjcCAQwxCjAI
-# oAKAAKECgAAwGQYJKoZIhvcNAQkDMQwGCisGAQQBgjcCAQQwHAYKKwYBBAGCNwIB
-# CzEOMAwGCisGAQQBgjcCARUwIwYJKoZIhvcNAQkEMRYEFMvvD7Gblea5voZ1g846
-# bz3CIS+0MA0GCSqGSIb3DQEBAQUABIIBAAymsrpFiNkt3wB8QHtOvMyDfAbf9kls
-# m8p6GqtiXpNPS996KhQfnHQbyl/uAzdZ2cSrQhDhndw9Yu372DOPNPCWLRGxSD8l
-# wbRa2jxU991+ETgGRb/HeIX2unrko/2sNAAsVodaccvjS0ficPnnsc20xaFaD8Wi
-# KZ0Sd4yGHWv2fuPMTu2SyKspF0dZmcfwtKCuzQb3J21mNZtES2TpQD93T1hAlrPD
-# pYcCho8NAEFXjQ9Aby7rXoo7pMtIQkqxcca7NAY61XgkwpgikUqnAhmoTzXRCWFG
-# N8qfHf9HFwJYikAqA0aGmex8irLUubzmcrcM5ylgE5/haXpyEQRBGc6hggILMIIC
-# BwYJKoZIhvcNAQkGMYIB+DCCAfQCAQEwcjBeMQswCQYDVQQGEwJVUzEdMBsGA1UE
-# ChMUU3ltYW50ZWMgQ29ycG9yYXRpb24xMDAuBgNVBAMTJ1N5bWFudGVjIFRpbWUg
-# U3RhbXBpbmcgU2VydmljZXMgQ0EgLSBHMgIQDs/0OMj+vzVuBNhqmBsaUDAJBgUr
-# DgMCGgUAoF0wGAYJKoZIhvcNAQkDMQsGCSqGSIb3DQEHATAcBgkqhkiG9w0BCQUx
-# DxcNMTUwNTA3MjIwMDAzWjAjBgkqhkiG9w0BCQQxFgQUTMK4qc2eubVgP3StzIV8
-# vNAQ7dswDQYJKoZIhvcNAQEBBQAEggEAQzYcp1wNIkO0sQwxnOfKrVn5ZXZrR0n8
-# Kp4LjR3VYKERTUsDNHCwNZwi8OTOnYejin4A/trSCyoNh5z/l+spYvJuZblU8qt0
-# p0R4DUcxS2ek/bVWmOmzdZhu76eUM3kD28nOcgOpcvVIT2syNtnwb6J2M5qKdIVi
-# /0aHAuMe/39yRwytg6rQuPdLwhAB8uPe1tlXiqjNh27ume6CH9uGC1YCP6Iy4Egy
-# Gy7EDp/uAN6qyGR8ssVkRoD91WCTtpRn36A4rXDqxlDmCpZ/VIfb4Wlsek6Za1OW
-# 0s5RjzqbqUnT5u+pHSLeMwRGAUlXxy1qVLnlJMVXfW7cQKl1h7GEGg==
-# SIG # End signature block
