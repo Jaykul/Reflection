@@ -60,10 +60,11 @@ if(!$ReflectionRoot) {
     $ReflectionRoot = Split-Path $MyInvocation.MyCommand.Path -Parent
 }
 
-Import-Module "${ReflectionRoot}\Accelerator.psm1"
-Import-Module "${ReflectionRoot}\AST.psm1"
-Import-Module "${ReflectionRoot}\CliXml.psm1"
-Import-Module "${ReflectionRoot}\ExtensionMethods.psm1"
+Import-Module "${ReflectionRoot}\Parameters.psm1" -Force
+Import-Module "${ReflectionRoot}\Accelerator.psm1" -Force
+Import-Module "${ReflectionRoot}\AST.psm1" -Force
+Import-Module "${ReflectionRoot}\CliXml.psm1" -Force
+Import-Module "${ReflectionRoot}\ExtensionMethods.psm1" -Force
 
 function Get-Type {
    <#

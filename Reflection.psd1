@@ -46,7 +46,7 @@ RequiredModules = @(@{ModuleName = 'Autoload'; GUID = '4001ca5f-8b94-41a1-9229-4
 # RequiredAssemblies = @()
 
 # Script files (.ps1) that are run in the caller's environment prior to importing this module.
-ScriptsToProcess = @("Get-ParameterValue.ps1")
+# ScriptsToProcess = @("Get-ParameterValue.ps1")
 
 # Type files (.ps1xml) to be loaded when importing this module
 # TypesToProcess = @()
@@ -67,7 +67,7 @@ FunctionsToExport = 'Add-Accelerator', 'Add-Assembly', 'Add-ConstructorFunction'
                'Remove-Accelerator', 'Set-DependencyProperty', 
                'Set-ObjectProperties', 'Set-Property', 'Test-AssignableToGeneric', 
                'Update-PSBoundParameters', 'Test-RestrictedLanguage', 
-               'Get-ParseResults', 'Find-Token'
+               'Get-ParseResults', 'Find-Token', 'Get-ParameterValue'
 
 # Cmdlets to export from this module
 CmdletsToExport = '*'
@@ -85,7 +85,7 @@ AliasesToExport = '*'
 # ModuleList = @()
 
 # List of all files packaged with this module
-FileList = 'Reflection.psm1', 'Reflection.psd1', 'license.txt'
+FileList = 'Reflection.psd1', 'Reflection.psm1', 'Parameters.psm1','Accelerator.psm1','ExtensionMethods.psm1','AST.psm1','CliXml.psm1','ExtensionMethods.ps1xml','license.txt'
 
 # Private data to pass to the module specified in RootModule/ModuleToProcess. This may also contain a PSData hashtable with additional module metadata used by PowerShell.
 PrivateData = @{

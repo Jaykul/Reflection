@@ -1,4 +1,4 @@
-function global:Get-ParameterValue {
+function Get-ParameterValue {
     #.Synopsis
     #  Get the actual values of parameters which have manually set (non-null) default values or values passed in the call
     #.Description
