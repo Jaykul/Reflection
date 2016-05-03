@@ -574,8 +574,8 @@ function Get-MemberSignature {
         )
 
         if($GenericArgumentTypes -and $GenericArguments) {
-            $notUsed = @(0..($GenericArguments.Count-1) | Where-Object { $_ -notin $used })
-            if($notused.Count -gt 0) {
+            $notUsed = @( 0..($GenericArguments.Count-1) | Where-Object { $_ -notin $used } )
+            if($notused.Length -gt 0) {
                 $i = 1
                 $Remaining = $GenericArgumentTypes[$notUsed] | % {
                     New-Object PSObject -Property @{

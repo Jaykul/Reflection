@@ -51,10 +51,14 @@ function Invoke-Generic {
         }
 
         Write-Debug "Get Method $MethodName from $Type"
+
+        $ParameterTypes = foreach($arg in $WithArgs) { $arg.GetType() }
       
         try {
             $MemberInfo = $Type.GetMethod($MethodName, $BindingFlags)
+            $MemberInfo = Resolve-GenericMethod $MemberInfo $GenericArgumentTypes $ParameterTypes
         } catch {
+            $MemberInfo = $null
             if($_.Exception.InnerException -is [System.Reflection.AmbiguousMatchException] ) {
                 Write-Debug "More that one MemberInfo found with $BindingFlags"
             } else {
@@ -62,7 +66,7 @@ function Invoke-Generic {
             }
         }
 
-        if(!$MemberInfo) {
+        if($null -eq $MemberInfo) {
             Write-Debug "$MethodName Method not found, search by name ..."
             try {
                 $Methods = @($Type.GetMethods($BindingFlags) | Where-Object { $_.Name -eq $MethodName })
@@ -73,138 +77,108 @@ function Invoke-Generic {
                 throw "Found no $MethodName on $Type"
             } elseif($Methods.Count -eq 1){
                 $MemberInfo = @($Methods)[0]
+                $MemberInfo = Resolve-GenericMethod $MemberInfo $GenericArgumentTypes $ParameterTypes
                 Write-Debug "Found a single ${MethodName}: $MemberInfo"
             } else {
                 Write-Debug "Choosing from $($Methods.Count) methods for $MethodName"
-                :methods foreach($MI in $Methods){
-
-                    [Array]$Parameters = $MI.GetParameters()
-                    [Array]$GenericArguments = $MI.GetGenericArguments()
-                    [Array]$GenericParameters = @([PSObject]) * $GenericArgument.Count
-
-                    # Determine if there are any generic parameters not satisfied by the arguments.
-                    
-
-                    # The number of generic arguments should match the number provided
-                    if($GenericArgumentTypes.Count -ne $GenericArguments.Count) { continue }
-                    Write-Debug "$($GenericArgumentTypes.Count) GenericArgumentTypes -eq $($GenericArguments.Count) GenericArguments"
-
+                foreach($MemberInfo in $Methods){
                     # The number of parameters should match the number provided
-                    if($WithArgs.Count -ne $Parameters.Count) { continue }
-                    Write-Debug "$($WithArgs.Count) WithArgs -eq $($Parameters.Count) Parameters"
+                    if($WithArgs.Count -ne $MemberInfo.GetParameters().Count) { continue }
 
-                    # Check the parameters more carefully
-                    for($i=0; $i -lt $Parameters.Count; $i++) {
-
-                        $parameterType = $Parameters[$i].ParameterType
-                        if($parameterType.IsGenericParameter) {
-                            $index = [array]::IndexOf($GenericArguments, $parameterType)
-                            $ConcreteType = $GenericArgumentTypes[ $index ]
-                            $GenericParameters[$index] = $ConcreteType
-                            Write-Debug "GenericParameter: $parameterType = $ConcreteType"
-                            continue
-                        }
-
-
-
-
-                        if( $parameterType.IsGenericType ) {
-                            # GenericTypes are like List<T> or Dictionary<TKey,TValue> so we have to make the generic arguments concrete..
-                            Write-Debug "GenericType: $parameterType"
-                            $GenericType = foreach($typeArg in $parameterType.GetGenericArguments()) {
-                                $genericIndex = [array]::IndexOf($GenericArguments, $typeArg)
-                                $GenericArgumentTypes[$genericIndex]
-                            }
-                            try {
-                                $ConcreteType = $parameterType.GetGenericTypeDefinition().MakeGenericType( $GenericType )
-                            } catch {}
-                            # If that didn't work, maybe it's because of an array type?
-                            if( !$ConcreteType.IsAssignableFrom($WithArgs[$i].GetType()) ) {
-                                Write-Debug "Parameter $i of $ConcreteType is not assignable try unwrapping arrays..."
-                                $GenericType = foreach($typeArg in $GenericType.GetGenericArguments()) {
-                                    if($typeArg.IsArray) {
-                                        $typeArg.GetElementType()
-                                    } elseif($typeArg -eq [hashtable]){
-                                        $typeArg
-                                    }
-                                }
-                                try {
-                                    $ConcreteType = $parameterType.GetGenericTypeDefinition().MakeGenericType( $GenericType )
-                                } catch {}
-                            }
-
-                            # If this still didn't work, it's most likely because they didn't pass types by hand...
-                            if( !$ConcreteType.IsAssignableFrom($WithArgs[$i].GetType()) ) {
-                                Write-Debug "Parameter $i of $ConcreteType is not assignable from $($WithArgs[$i].GetType())"
-                                continue methods
-                            }
-
-                        } 
-                        Write-Debug "Parameter $i of type $ConcreteType"
-                    }
-                    $MemberInfo = $MI
-                    break
+                    $MemberInfo = Resolve-GenericMethod $MemberInfo $GenericArgumentTypes $ParameterTypes
+                    if($null -ne $MemberInfo) { break }
                 }
             }
         }
-        if(!$MemberInfo) {
+
+        if($null -eq $MemberInfo) {
             throw "Cannot find a Method $MethodName on $Type with the right signature..."
         }
-        Write-Verbose "Make Generic Method for $MemberInfo"
-
-        # [Type[]]$GenericParameters = @()
-        # [Array]$ConcreteTypes = @($MemberInfo.GetParameters() | Select -Expand ParameterType)
-        # for($i=0;$i -lt $GenericArgumentTypes.Count;$i++){
-        #     Write-Verbose "$($GenericArgumentTypes[$i]) ? $($ConcreteTypes[$i] -eq $GenericArgumentTypes[$i])"
-        #     if($ConcreteTypes[$i] -ne $GenericArgumentTypes[$i]) {
-        #         $GenericParameters += $GenericArgumentTypes[$i]
-        #     }
-        #     $GenericArgumentTypes[$i] = Add-Member -in $GenericArgumentTypes[$i] -Type NoteProperty -Name IsGeneric -Value $($ConcreteTypes[$i] -ne $GenericArgumentTypes[$i]) -Passthru
-        # }
-
-        # $GenericArgumentTypes | Where-Object { $_.IsGeneric }
-        # Write-Verbose "$($GenericParameters -join ', ') generic parameters"
-
-        # Because so many generic methods are IEnumerable...
-
-        $ElementTypes = if($WithArgs) {
-            foreach($GenericType in $GenericArgumentTypes) {
-                if($GenericType.IsArray) {
-                    $GenericType.GetElementType()
-                } else {
-                    $GenericType
-                }
-            }
-        } else {
-            $GenericArgumentTypes
-        }
-
-        try {
-            $MemberInfo = $MemberInfo.MakeGenericMethod( $ElementTypes )
-            $AlternateMemberInfo = $MemberInfo.MakeGenericMethod( $GenericArgumentTypes )
-        } catch {
-            $MemberInfo = $MemberInfo.MakeGenericMethod( $GenericArgumentTypes )
-        }
-
 
         if($WithArgs) {
-            [Object[]]$Arguments = @();
-            foreach($arg in $withArgs) {
-                $Arguments += ,($arg | %{ $_.PSObject.BaseObject })
-            }
-            Write-Verbose "Arguments: $($(foreach($arg in $withArgs) { $arg.GetType().Name }) -Join ', ')"
-            $Global:MemberInfo = $MemberInfo
-            $Global:Type = $InputObject
-            $Global:Arguments = $Arguments
-            try {
-                $MemberInfo.Invoke( $InputObject, $Arguments )
-            } catch {
-                if($AlternateMemberInfo) {
-                    $AlternateMemberInfo.Invoke( $InputObject, $Arguments )
-                }
-            }
+            Write-Debug "Invoke: $MemberInfo with arguments: $($(foreach($arg in $withArgs) { $arg.GetType().Name }) -Join ', ')"
+            $MemberInfo.Invoke( $InputObject, $withArgs )
         } else {
+            Write-Debug "Invoke: $MemberInfo"
             $MemberInfo.Invoke( $InputObject )
         }
     } 
+}
+
+
+function Resolve-GenericMethod {
+    #.Synopsis
+    #   Resolve a GenericMethod with the given argument types
+    [CmdletBinding()]
+    param( 
+        # The generic method you want to resolve
+        $MethodInfo,
+
+        # The types to be used for extra generic arguments
+        $GenericArgumentTypes,
+
+        # The types of the parameters you want to pass to the method
+        [Type[]]$ParameterTypes
+    )
+
+    Write-Debug "Resolve Generic Arguments for $MethodInfo"
+
+    [Array]$Parameters = $MethodInfo.GetParameters()
+    # Determine if there are any generic parameters not satisfied by the arguments.
+    $unresolvedCount = 0
+    $GenericTypes = $(
+        :generic foreach($Generic in $MethodInfo.GetGenericArguments()) {
+            Write-Debug "Resolve Generic Type: $Generic"
+            for($i=0; $i -lt $Parameters.Count; $i++) {
+                $parameterType = $Parameters[$i].ParameterType
+                $argumentType = $ParameterTypes[$i]
+                # If this parameter is the same as the generic
+                if($parameterType.IsGenericParameter -and $parameterType -eq $Generic) {
+                    Write-Output $argumentType
+                    # Then the type of the generic is the type of the argument
+                    Write-Debug "Resolved Generic Type $Generic to $argumentType"
+                    continue generic
+                }
+            }
+
+            # If there aren't any parameters which are exact matches
+            for($i=0; $i -lt $Parameters.Length; $i++) {
+                $parameterType = $Parameters[$i].ParameterType
+                $argumentType = $ParameterTypes[$i]
+
+                # look at the generic values of generic parameters
+                if( $parameterType.IsGenericType) {
+                    if($argumentType.IsGenericType ) {
+                        $TypeArguments = $parameterType.GetGenericArguments()
+                        for($j=0; $j -lt $TypeArguments.Length; $j++) {
+                            if($TypeArguments[0] -eq $Generic){
+                                $concrete = $argumentType.GetGenericArguments()[$j]
+                                Write-Output $concrete
+                                # Then the type of the generic is the type of the argument
+                                Write-Debug "Resolved Generic Type $Generic to $concrete"
+                                continue generic
+                            }
+                        }
+                    } elseif( $argumentType.IsArray ) {
+                        $concrete = $argumentType.GetElementType()
+                        Write-Output $concrete
+                        # Then the type of the generic is the type of the argument
+                        Write-Debug "Resolved Generic Type $Generic to $concrete"
+                        continue generic
+                    }
+                }
+            }
+            if($GenericArgumentTypes.Count -gt $unresolvedCount) {
+                $concrete = $GenericArgumentTypes[$unresolvedCount++]
+                Write-Output $concrete
+                Write-Debug "Using $concrete for generic Type $Generic"
+                continue generic
+            }
+            Write-Debug "Insufficient GenericArgumentTypes"
+            return $null
+        }
+    )
+
+    Write-Debug "Resolve Generic Method for $MethodInfo with $GenericTypes"
+    return $MethodInfo.MakeGenericMethod( $GenericTypes )
 }
