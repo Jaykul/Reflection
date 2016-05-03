@@ -2,10 +2,8 @@ $GenericInvoke = '
 [CmdletBinding()]
 param({0})
 
-$Types = @({3})
-$Parameters = @({4})
-
-Write-Warning "Invoke-Generic -Static -On [{1}] -Named {2} -Types $($Types -join "","") -WithArgs $($Parameters -join "","")"
+$Parameters = @({3})
+$Types = @({4})
 
 Invoke-Generic -On {1} -Static -Named {2} -GenericArgumentTypes $Types -WithArgs $Parameters
 '
@@ -13,7 +11,10 @@ Invoke-Generic -On {1} -Static -Named {2} -GenericArgumentTypes $Types -WithArgs
 
 $NormalInvoke = '
 param({0})
-[{1}]::{2}.Invoke($PSBoundParameters.Values)
+
+$Parameters = @({3})
+
+[{1}]::{2}.Invoke($Parameters)
 '
 
 
@@ -106,9 +107,6 @@ function Import-ExtensionMethod {
     foreach($Method in Get-ExtensionMethod @PSBoundParameters) {
         Write-Verbose ("[{0}]::{1}({2})" -f $Method.DeclaringType, $Method.Name, @($Method.GetParameters()).Length)
 
-        $ParamBlock = $Method | Get-MemberSignature -ParamBlock -AsExtensionMethod
-        $Script = $NormalInvoke -f $ParamBlock, $Method.DeclaringType, $Method.Name
-
         if($Method.IsGenericMethod) { 
             $Types = @()
             $ParamBlock = $Method | Get-MemberSignature -GenericArgumentTypes $TargetTypeName -ConcreteArguments ([ref]$Types) -ParamBlock -AsExtensionMethod
@@ -128,7 +126,19 @@ function Import-ExtensionMethod {
             # NOTE: the magic regex is to pull the $paramName off the end of the [ParamType]
 
             
-            $Script = $GenericInvoke -f $ParamBlock, $Method.DeclaringType, $Method.Name, $Types, $Parameters
+            $Script = $GenericInvoke -f $ParamBlock, $Method.DeclaringType, $Method.Name, $Parameters, $Types
+        } else {
+            $ParamBlock = $Method | Get-MemberSignature -ParamBlock -AsExtensionMethod
+            $Parameters = @($ParamBlock -replace '(?:\[[^\]]*\])+(\$\w+)[^[]*','$1,' -split ',' | Where { $_ })
+            Write-Verbose ($Parameters -join ",")
+            if($Parameters.Length -gt 1) {
+                $Parameters = @($Parameters[-1]) + @($Parameters[0..($Parameters.Length-2)])
+                $Parameters = $Parameters -join ","
+            } else { 
+                $Parameters = "," + $Parameters
+            }
+
+            $Script = $NormalInvoke -f $ParamBlock, $Method.DeclaringType, $Method.Name, $Parameters
         }
 
         $Script = [ScriptBlock]::Create($Script)

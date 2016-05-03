@@ -73,17 +73,16 @@ function Invoke-Generic {
             } catch {
                 throw "Cannot find $MethodName on $Type"
             }
-            if($Methods.Count -eq 0){
+            if($Methods.Length -eq 0){
                 throw "Found no $MethodName on $Type"
-            } elseif($Methods.Count -eq 1){
-                $MemberInfo = @($Methods)[0]
-                $MemberInfo = Resolve-GenericMethod $MemberInfo $GenericArgumentTypes $ParameterTypes
+            } elseif($Methods.Length -eq 1){
+                $MemberInfo = Resolve-GenericMethod (@($Methods)[0]) $GenericArgumentTypes $ParameterTypes
                 Write-Debug "Found a single ${MethodName}: $MemberInfo"
             } else {
-                Write-Debug "Choosing from $($Methods.Count) methods for $MethodName"
+                Write-Debug "Choosing from $($Methods.Length) methods for $MethodName"
                 foreach($MemberInfo in $Methods){
                     # The number of parameters should match the number provided
-                    if($WithArgs.Count -ne $MemberInfo.GetParameters().Count) { continue }
+                    if($WithArgs.Length -ne $MemberInfo.GetParameters().Length) { continue }
 
                     $MemberInfo = Resolve-GenericMethod $MemberInfo $GenericArgumentTypes $ParameterTypes
                     if($null -ne $MemberInfo) { break }
@@ -115,7 +114,7 @@ function Resolve-GenericMethod {
         $MethodInfo,
 
         # The types to be used for extra generic arguments
-        $GenericArgumentTypes,
+        [Array]$GenericArgumentTypes,
 
         # The types of the parameters you want to pass to the method
         [Type[]]$ParameterTypes
@@ -129,7 +128,7 @@ function Resolve-GenericMethod {
     $GenericTypes = $(
         :generic foreach($Generic in $MethodInfo.GetGenericArguments()) {
             Write-Debug "Resolve Generic Type: $Generic"
-            for($i=0; $i -lt $Parameters.Count; $i++) {
+            for($i=0; $i -lt $Parameters.Length; $i++) {
                 $parameterType = $Parameters[$i].ParameterType
                 $argumentType = $ParameterTypes[$i]
                 # If this parameter is the same as the generic
@@ -168,7 +167,7 @@ function Resolve-GenericMethod {
                     }
                 }
             }
-            if($GenericArgumentTypes.Count -gt $unresolvedCount) {
+            if($GenericArgumentTypes.Length -gt $unresolvedCount) {
                 $concrete = $GenericArgumentTypes[$unresolvedCount++]
                 Write-Output $concrete
                 Write-Debug "Using $concrete for generic Type $Generic"
